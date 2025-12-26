@@ -254,55 +254,75 @@ public:
 
     sensor_msgs::Imu imuConverter(const sensor_msgs::Imu &imu_in) 
     {
-    sensor_msgs::Imu imu_out = imu_in;
-    // rotate acceleration
-    Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y, imu_in.linear_acceleration.z);
-    //livox 内置的六轴imu的加速度单位是g 这里要还原到m/s^2
-    if(imuType==0)
-        acc*=imuGravity;
+        // 创建一个IMU输出消息，并将输入IMU消息直接赋值给输出IMU消息
+        sensor_msgs::Imu imu_out = imu_in;
 
-    acc = extRot * acc;
-    imu_out.linear_acceleration.x = acc.x();
-    imu_out.linear_acceleration.y = acc.y();
-    imu_out.linear_acceleration.z = acc.z();
-    // rotate gyroscope
-    Eigen::Vector3d gyr(imu_in.angular_velocity.x, imu_in.angular_velocity.y, imu_in.angular_velocity.z);
-    gyr = extRot * gyr;
-    imu_out.angular_velocity.x = gyr.x();
-    imu_out.angular_velocity.y = gyr.y();
-    imu_out.angular_velocity.z = gyr.z();
-    // rotate roll pitch yaw
-    Eigen::Quaterniond q_from(imu_in.orientation.w, imu_in.orientation.x, imu_in.orientation.y,
-                                imu_in.orientation.z);
-    Eigen::Quaterniond q_final;
+        // 从输入的IMU消息中获取加速度数据
+        Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y, imu_in.linear_acceleration.z);
 
-    if (imuType == 0)
-    {
-        q_final = extQRPY;
+        // Livox内置的六轴IMU的加速度单位是g (重力加速度)，需要转换为m/s^2
+        if(imuType == 0) {
+            // 乘以重力加速度值，通常是9.81 m/s^2
+            acc *= imuGravity;
+        }
+
+        // 旋转加速度数据，使用外部的旋转矩阵（extRot）进行坐标转换
+        acc = extRot * acc;
+
+        // 将转换后的加速度数据重新赋值到输出IMU消息中
+        imu_out.linear_acceleration.x = acc.x();
+        imu_out.linear_acceleration.y = acc.y();
+        imu_out.linear_acceleration.z = acc.z();
+
+        // 从输入的IMU消息中获取陀螺仪数据（角速度）
+        Eigen::Vector3d gyr(imu_in.angular_velocity.x, imu_in.angular_velocity.y, imu_in.angular_velocity.z);
+
+        // 旋转陀螺仪数据，使用外部的旋转矩阵（extRot）进行坐标转换
+        gyr = extRot * gyr;
+
+        // 将转换后的角速度数据重新赋值到输出IMU消息中
+        imu_out.angular_velocity.x = gyr.x();
+        imu_out.angular_velocity.y = gyr.y();
+        imu_out.angular_velocity.z = gyr.z();
+
+        // 从输入的IMU消息中获取四元数数据（表示姿态的四元数）
+        Eigen::Quaterniond q_from(imu_in.orientation.w, imu_in.orientation.x, imu_in.orientation.y, imu_in.orientation.z);
+
+        // 定义最终的四元数（转换后的四元数）
+        Eigen::Quaterniond q_final;
+
+        // 根据imuType的不同值，选择不同的转换方式
+        if (imuType == 0) {
+            // 如果是6轴IMU，则直接使用外部四元数（extQRPY）进行旋转
+            q_final = extQRPY;
+        } else if (imuType == 1) {
+            // 如果是9轴IMU，则将输入的四元数与外部四元数（extQRPY）进行组合
+            q_final = q_from * extQRPY;
+        } else {
+            // 如果imuType不是0或1，输出错误提示
+            std::cout << "pls set your imu_type, 0 for 6axis and 1 for 9axis" << std::endl;
+        }
+
+        // 对最终四元数进行归一化处理
+        q_final.normalize();
+
+        // 将归一化后的四元数分量赋值给输出IMU消息
+        imu_out.orientation.x = q_final.x();
+        imu_out.orientation.y = q_final.y();
+        imu_out.orientation.z = q_final.z();
+        imu_out.orientation.w = q_final.w();
+
+        // 检查四元数是否有效（是否接近单位四元数）
+        if (sqrt(q_final.x() * q_final.x() + q_final.y() * q_final.y() + q_final.z() * q_final.z() + q_final.w() * q_final.w()) < 0.1) {
+            // 如果四元数的模长接近零，说明是无效的四元数，输出错误信息并关闭ROS节点
+            ROS_ERROR("Invalid quaternion, please use a 9-axis IMU!");
+            ros::shutdown();
+        }
+
+        // 返回转换后的IMU消息
+        return imu_out;
     }
-    else if (imuType == 1)
-    {
-        q_final = q_from * extQRPY;
-    }
-    else
-        std::cout << "pls set your imu_type, 0 for 6axis and 1 for 9axis" << std::endl;
 
-    q_final.normalize();
-    imu_out.orientation.x = q_final.x();
-    imu_out.orientation.y = q_final.y();
-    imu_out.orientation.z = q_final.z();
-    imu_out.orientation.w = q_final.w();
-
-    if (sqrt(
-            q_final.x() * q_final.x() + q_final.y() * q_final.y() + q_final.z() * q_final.z() +
-            q_final.w() * q_final.w())
-        < 0.1) {
-        ROS_ERROR("Invalid quaternion, please use a 9-axis IMU!");
-        ros::shutdown();
-    }
-
-    return imu_out;
-}
 };
 
 template<typename T>
